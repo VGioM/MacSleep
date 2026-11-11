@@ -6,7 +6,11 @@ enum Entry {
     static func main() {
         // The root helper runs this same binary without UI.
         let args = CommandLine.arguments
-        if args.contains("--sync") { exit(Helper.sync()) }
+        if args.contains("--sync") {
+            let status = Helper.sync()
+            CatchUp.run()
+            exit(status)
+        }
         if args.contains("--uninstall") { exit(Helper.uninstall()) }
         if let i = args.firstIndex(of: "--install"), i + 1 < args.count {
             exit(Helper.install(rulesFile: args[i + 1]))
@@ -23,9 +27,31 @@ struct MacSleepApp: App {
             ContentView()
         }
         .windowResizability(.contentSize)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button(SelfUpdate.menuTitle) { SelfUpdate.checkNow() }
+                AutomaticUpdates()
+            }
+        }
+    }
+}
+
+/// « Rechercher automatiquement les mises à jour », cochable dans le menu MacSleep.
+private struct AutomaticUpdates: View {
+    @AppStorage(SelfUpdate.automaticKey) private var automatic = true
+
+    var body: some View {
+        Toggle(SelfUpdate.automaticTitle, isOn: $automatic)
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Les builds de développement ne se mettent pas à jour.
+        #if !DEBUG
+        SelfUpdate.start(repo: "VGioM/MacSleep")
+        #endif
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }

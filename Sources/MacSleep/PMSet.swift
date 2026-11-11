@@ -11,7 +11,10 @@ struct OneOffEvent: Identifiable, Equatable {
     var fromRule: Bool { owner == Helper.owner }
 
     /// One-off wakes added from the window (or with pmset in the Terminal).
-    var isManual: Bool { (owner == Helper.manualOwner || owner == "pmset") && date != nil }
+    /// The daemon's catch-ups count too: they can be cancelled the same way.
+    var isManual: Bool {
+        [Helper.manualOwner, CatchUp.owner, "pmset"].contains(owner ?? "") && date != nil
+    }
 }
 
 /// What macOS has actually recorded.

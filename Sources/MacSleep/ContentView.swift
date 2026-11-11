@@ -3,15 +3,23 @@ import SwiftUI
 
 @MainActor
 final class Model: ObservableObject {
-    @Published var rules = Rules.load()
+    @Published var rules = Rules.load().rules
+    @Published var catchUp = Rules.load().catchUp
     @Published private(set) var saved = Rules.load()
     @Published private(set) var installed = Helper.isInstalled
+    /// The service runs the binary of an older version of the app.
+    @Published private(set) var outdated = Helper.isInstalled && !Helper.isCurrent
     @Published private(set) var system = PMSet.read()
     @Published var oneOff = Model.tomorrowMorning
     @Published var error: String?
 
     /// True when the window differs from what the service runs.
-    var dirty: Bool { rules != saved || (!rules.isEmpty && !installed) }
+    var dirty: Bool { current != saved || (!rules.isEmpty && (!installed || outdated)) }
+
+    private var current: Settings { Settings(rules: rules, catchUp: catchUp) }
+
+    /// A catch-up the daemon has scheduled (see CatchUp), still to come.
+    var pendingCatchUp: OneOffEvent? { upcoming.first { $0.owner == CatchUp.owner } }
 
     var problem: String? {
         rules.contains { $0.days.isEmpty } ? "Chaque règle doit avoir au moins un jour." : nil
@@ -46,7 +54,7 @@ final class Model: ObservableObject {
         error = nil
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("MacSleep-rules.json")
         do {
-            try Rules.encode(rules).write(to: file, options: .atomic)
+            try Rules.encode(current).write(to: file, options: .atomic)
         } catch {
             self.error = error.localizedDescription
             return
@@ -84,6 +92,7 @@ final class Model: ObservableObject {
     func refresh() {
         system = PMSet.read()
         installed = Helper.isInstalled
+        outdated = installed && !Helper.isCurrent
         saved = Rules.load()
     }
 
@@ -109,6 +118,19 @@ struct ContentView: View {
         VStack(spacing: 0) {
             header
             Form {
+                if let event = model.pendingCatchUp, let date = event.date {
+                    Section {
+                        HStack {
+                            Label("\(EventRow.noun(event.type)) de rattrapage \(EventRow.when(date)) : le Mac s'est rallumé pendant la nuit.",
+                                  systemImage: "moon.haze.fill")
+                                .foregroundStyle(.indigo)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Button("Annuler") { model.cancel(event) }
+                        }
+                    }
+                }
+
                 Section {
                     if model.rules.isEmpty {
                         Text("Aucune règle. Ajoutez par exemple « Éteindre à 2:00 le lundi » puis « Réveiller ou allumer à 9:00 le lundi ».")
@@ -128,6 +150,14 @@ struct ContentView: View {
                     if model.rules.contains(where: { $0.action == .shutdown }) {
                         warning("Un document non enregistré peut bloquer l'extinction.")
                     }
+                }
+
+                Section {
+                    Toggle("Rattraper la nuit si le Mac se rallume", isOn: $model.catchUp)
+                    Text("Si le Mac est allumé ou réveillé après une veille ou une extinction programmée et avant le réveil suivant, il est remis en veille ou éteint 10 minutes plus tard, une seule fois par nuit. Une notification le signale et MacSleep s'ouvre pour pouvoir l'annuler.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Section("Réveil ponctuel") {
@@ -181,7 +211,7 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        let active = model.installed && !model.saved.isEmpty
+        let active = model.installed && !model.saved.rules.isEmpty
         let next = model.upcoming.first { $0.fromRule }
         return HStack(spacing: 14) {
             Image(systemName: active ? "moon.zzz.fill" : "powersleep")
@@ -197,7 +227,7 @@ struct ContentView: View {
                     } else if let next, let date = next.date {
                         Text("Prochain : \(EventRow.noun(next.type).lowercased()) \(EventRow.when(date))")
                     } else {
-                        Text("\(model.saved.count) règle(s) active(s).")
+                        Text("\(model.saved.rules.count) règle(s) active(s).")
                     }
                 }
                 .foregroundStyle(.secondary)
@@ -212,6 +242,8 @@ struct ContentView: View {
         VStack(alignment: .trailing, spacing: 8) {
             if let problem = model.problem {
                 warning(problem)
+            } else if model.outdated && !model.rules.isEmpty {
+                warning("MacSleep a été mis à jour : enregistrez pour mettre le service à jour.")
             }
             HStack {
                 Button("Tout désactiver", role: .destructive) { model.disableAll() }

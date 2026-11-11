@@ -58,24 +58,47 @@ struct Rule: Codable, Identifiable, Equatable {
     var days = Weekday.all
 }
 
+/// Everything the service runs from: the rules and their options.
+struct Settings: Codable, Equatable {
+    var rules: [Rule] = []
+    /// Put the Mac back to sleep (or off) when it comes on during the night.
+    var catchUp = true
+
+    init(rules: [Rule] = [], catchUp: Bool = true) {
+        self.rules = rules
+        self.catchUp = catchUp
+    }
+
+    init(from decoder: Decoder) throws {
+        // Version 1.0 wrote the bare list of rules.
+        if let rules = try? decoder.singleValueContainer().decode([Rule].self) {
+            self.init(rules: rules)
+            return
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(rules: try c.decodeIfPresent([Rule].self, forKey: .rules) ?? [],
+                  catchUp: try c.decodeIfPresent(Bool.self, forKey: .catchUp) ?? true)
+    }
+}
+
 /// The rules live in a root-owned file: the app writes it through the admin
 /// prompt, the daemon reads it.
 enum Rules {
     static let directory = URL(fileURLWithPath: "/Library/Application Support/MacSleep")
     static let url = directory.appendingPathComponent("rules.json")
 
-    static func read(_ url: URL = url) throws -> [Rule] {
-        try JSONDecoder().decode([Rule].self, from: Data(contentsOf: url))
+    static func read(_ url: URL = url) throws -> Settings {
+        try JSONDecoder().decode(Settings.self, from: Data(contentsOf: url))
     }
 
-    static func load() -> [Rule] {
-        (try? read()) ?? []
+    static func load() -> Settings {
+        (try? read()) ?? Settings()
     }
 
-    static func encode(_ rules: [Rule]) throws -> Data {
+    static func encode(_ settings: Settings) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(rules)
+        return try encoder.encode(settings)
     }
 
     /// Every event the rules ask for after `start`, up to `end`.

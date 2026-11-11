@@ -16,6 +16,13 @@ enum Helper {
 
     static var isInstalled: Bool { FileManager.default.fileExists(atPath: plistPath) }
 
+    /// The root copy is this very binary. After an update of the app it is
+    /// not, until the rules are saved again.
+    static var isCurrent: Bool {
+        guard let executable = Bundle.main.executablePath else { return true }
+        return FileManager.default.contentsEqual(atPath: executable, andPath: path)
+    }
+
     // MARK: - Run from the app, behind the admin prompt
 
     /// Copies this binary into place, then lets it install itself as root.
@@ -37,9 +44,9 @@ enum Helper {
     static func install(rulesFile: String) -> Int32 {
         let fm = FileManager.default
         do {
-            let rules = try Rules.read(URL(fileURLWithPath: rulesFile))
+            let settings = try Rules.read(URL(fileURLWithPath: rulesFile))
             try fm.createDirectory(at: Rules.directory, withIntermediateDirectories: true)
-            try Rules.encode(rules).write(to: Rules.url, options: .atomic)
+            try Rules.encode(settings).write(to: Rules.url, options: .atomic)
             try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: Rules.url.path)
 
             let plist: [String: Any] = [
@@ -60,6 +67,7 @@ enum Helper {
         // The rules replace pmset's single repeating pair.
         PMSet.run(["repeat", "cancel"])
         let status = sync()
+        CatchUp.markPast(Rules.load().rules)
 
         launchctl("bootout", "system/\(label)")
         let (loaded, output) = launchctl("bootstrap", "system", plistPath)
@@ -81,7 +89,7 @@ enum Helper {
     /// Adds the events the rules want in the coming `horizon` and cancels the
     /// MacSleep events they no longer want. Leaves every other event alone.
     @discardableResult
-    static func sync(rules: [Rule] = Rules.load()) -> Int32 {
+    static func sync(rules: [Rule] = Rules.load().rules) -> Int32 {
         // Events about to fire are left as they are.
         let start = Date().addingTimeInterval(60)
         let wanted = Set(Rules.events(rules, after: start, until: start.addingTimeInterval(horizon))

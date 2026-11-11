@@ -3,12 +3,47 @@
 Programme la mise en veille (ou l'extinction) du Mac le soir et son réveil
 (ou allumage) le matin, depuis une fenêtre, sans passer par le Terminal.
 
+## Installation
+
+Téléchargez `MacSleep-X.Y.Z-macOS-arm64.zip` depuis la
+[dernière release](https://github.com/VGioM/MacSleep/releases/latest),
+ouvrez-le et glissez **MacSleep.app** dans **Applications**. L'app n'est pas
+notarisée par Apple : au premier lancement, ouvrez **Réglages Système →
+Confidentialité et sécurité** et cliquez sur **Ouvrir quand même**, ou :
+
 ```bash
-./install.sh        # compile et copie dans /Applications
-open /Applications/MacSleep.app
+xattr -dr com.apple.quarantine /Applications/MacSleep.app
 ```
 
-Aucune dépendance externe : `swift build` suffit. macOS 14 minimum.
+Ensuite, MacSleep vérifie au lancement (une fois par jour au plus) s'il
+existe une nouvelle version et propose de l'installer. Menu **MacSleep →
+Rechercher les mises à jour…** pour vérifier tout de suite. Après une mise à
+jour, cliquez **Enregistrer** pour que le service passe aussi à la nouvelle
+version.
+
+macOS 14 ou plus récent, Mac Apple Silicon.
+
+### Depuis les sources
+
+```bash
+./install.sh        # compile et copie dans /Applications
+./Tests/run-unit.sh # tests
+```
+
+Aucune dépendance externe : `swift build` suffit.
+
+### Publier une version
+
+```bash
+./release.sh 1.2.0            # notes tirées des commits
+./release.sh 1.2.0 notes.md   # notes écrites à la main
+```
+
+Le script compile, teste, committe « Version X.Y.Z », pousse le tag et crée
+la release GitHub avec le zip. La mise à jour intégrée n'installe qu'une
+version signée avec le même certificat que l'app en place : « VGioM Local
+Signing », créé une fois par `./signing-cert.sh`. Sur un autre Mac de build,
+importez ce certificat plutôt que d'en créer un nouveau.
 
 ---
 
@@ -21,6 +56,14 @@ Aucune dépendance externe : `swift build` suffit. macOS 14 minimum.
 2. Cliquez **Enregistrer**. macOS demande le mot de passe administrateur.
 
 Le réveil sort le Mac de veille s'il dort, et l'allume s'il est éteint.
+
+**Rattraper la nuit si le Mac se rallume** (activé par défaut) : les règles
+sont des événements à une heure précise, pas une plage. Sans cette option,
+un Mac rallumé à 0:45 après « Éteindre à 0:30 » et avant « Réveiller à
+8:30 » resterait allumé. Avec, le service le remet en veille ou l'éteint
+10 minutes plus tard, une seule fois par nuit ; une notification le signale
+et MacSleep s'ouvre avec un bouton **Annuler**. Il faut au moins une règle de
+réveil pour qu'il y ait une « nuit ».
 
 **Réveil ponctuel** ajoute un réveil unique, en plus des règles.
 **Prochains événements dans macOS** montre ce que le système a réellement
@@ -48,7 +91,9 @@ Un service système les tient à jour sur les 8 jours à venir :
   appartenant à root, lancée avec `--sync` ;
 - `/Library/LaunchDaemons/com.macsleep.daemon.plist` : le lance au démarrage et
   toutes les heures (rattrapé au réveil si le Mac dormait) ;
-- `/Library/Application Support/MacSleep/rules.json` : les règles.
+- `/Library/Application Support/MacSleep/rules.json` : les règles ;
+- `/Library/Application Support/MacSleep/catchup.json` : la dernière nuit
+  déjà rattrapée.
 
 La synchro ajoute les événements manquants et retire ceux qu'aucune règle ne
 demande plus. Elle ne touche jamais aux événements des autres apps ni aux
