@@ -67,7 +67,7 @@ enum Helper {
         // The rules replace pmset's single repeating pair.
         PMSet.run(["repeat", "cancel"])
         let status = sync()
-        CatchUp.markPast(Rules.load().rules)
+        CatchUp.markPast(Rules.load())
 
         launchctl("bootout", "system/\(label)")
         let (loaded, output) = launchctl("bootstrap", "system", plistPath)
@@ -77,7 +77,7 @@ enum Helper {
     }
 
     static func uninstall() -> Int32 {
-        let status = sync(rules: [])
+        let status = sync(Settings())
         launchctl("bootout", "system/\(label)")
         for item in [plistPath, Rules.directory.path, path] {
             try? FileManager.default.removeItem(atPath: item)
@@ -89,10 +89,10 @@ enum Helper {
     /// Adds the events the rules want in the coming `horizon` and cancels the
     /// MacSleep events they no longer want. Leaves every other event alone.
     @discardableResult
-    static func sync(rules: [Rule] = Rules.load().rules) -> Int32 {
+    static func sync(_ settings: Settings = Rules.load()) -> Int32 {
         // Events about to fire are left as they are.
         let start = Date().addingTimeInterval(60)
-        let wanted = Set(Rules.events(rules, after: start, until: start.addingTimeInterval(horizon))
+        let wanted = Set(Rules.events(settings.rules, exceptions: settings.exceptions, after: start, until: start.addingTimeInterval(horizon))
             .map { key($0.action.rawValue, $0.date) })
         let current = Set(PMSet.read().oneOff.compactMap { event -> String? in
             guard event.fromRule, let date = event.date, date > start else { return nil }

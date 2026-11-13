@@ -17,14 +17,15 @@ enum CatchUp {
     /// event of the last 24 hours is a sleep or a shutdown, and the next wake
     /// of the rules is still far enough ahead. Without any wake rule there is
     /// no night to speak of, so nothing.
-    static func missed(_ rules: [Rule], now: Date) -> (action: Action, date: Date)? {
-        guard rules.contains(where: { $0.action == .wakeorpoweron }) else { return nil }
-        // An event of the last minute is pmset's own business.
-        let past = Rules.events(rules, after: now.addingTimeInterval(-24 * 3600),
+    static func missed(_ rules: [Rule], exceptions: [Exception] = [], now: Date) -> (action: Action, date: Date)? {
+        guard rules.contains(where: { $0.enabled && $0.action == .wakeorpoweron }) else { return nil }
+        // An event of the last minute is pmset's own business. A night event
+        // skipped for tonight is not there: nothing to catch up.
+        let past = Rules.events(rules, exceptions: exceptions, after: now.addingTimeInterval(-24 * 3600),
                                 until: now.addingTimeInterval(-60))
         guard let last = past.last, last.action.isNight else { return nil }
         // Rules.events is bounded by Helper.horizon, so is the wake looked for.
-        let wake = Rules.events(rules, after: now, until: now.addingTimeInterval(Helper.horizon))
+        let wake = Rules.events(rules, exceptions: exceptions, after: now, until: now.addingTimeInterval(Helper.horizon))
             .first { $0.action == .wakeorpoweron }
         guard let wake, wake.date.timeIntervalSince(now) > delay + 5 * 60 else { return nil }
         return last
@@ -34,7 +35,7 @@ enum CatchUp {
 
     /// From the daemon's hourly `--sync`.
     static func run(_ settings: Settings = Rules.load(), now: Date = Date()) {
-        guard settings.catchUp, let event = missed(settings.rules, now: now) else { return }
+        guard settings.catchUp, let event = missed(settings.rules, exceptions: settings.exceptions, now: now) else { return }
         let key = PMSet.stamp(event.date)
         guard handled != key else { return }
         handled = key
@@ -52,8 +53,8 @@ enum CatchUp {
 
     /// Saving rules in the middle of the night must not put the Mac to sleep
     /// straight away: whatever night event is already past counts as handled.
-    static func markPast(_ rules: [Rule], now: Date = Date()) {
-        handled = missed(rules, now: now).map { PMSet.stamp($0.date) }
+    static func markPast(_ settings: Settings, now: Date = Date()) {
+        handled = missed(settings.rules, exceptions: settings.exceptions, now: now).map { PMSet.stamp($0.date) }
     }
 
     private static var handled: String? {

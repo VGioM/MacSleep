@@ -65,6 +65,17 @@ un Mac rallumé à 0:45 après « Éteindre à 0:30 » et avant « Réveiller à
 et MacSleep s'ouvre avec un bouton **Annuler**. Il faut au moins une règle de
 réveil pour qu'il y ait une « nuit ».
 
+**Mettre une règle en pause** : l'interrupteur devant chaque règle la garde
+dans la liste sans qu'elle agisse, jusqu'à ce qu'on la rallume.
+
+**Ce soir seulement** : sous chaque règle, sa prochaine fois, avec
+**Sauter** (rien cette fois-ci) et **Reporter…** (une autre heure, cette
+fois-ci seulement, par exemple la veille à 2:00 au lieu de 0:30, ou le
+réveil de demain sauté). La règle reprend ensuite comme d'habitude ;
+**Rétablir** annule l'exception. Le rattrapage de la nuit en tient compte :
+une veille sautée n'est pas « manquée », une veille reportée est rattrapée
+après sa nouvelle heure.
+
 **Réveil ponctuel** ajoute un réveil unique, en plus des règles.
 **Prochains événements dans macOS** montre ce que le système a réellement
 programmé. **Tout désactiver** retire les règles, leurs événements et le

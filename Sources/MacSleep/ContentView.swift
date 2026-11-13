@@ -5,6 +5,7 @@ import SwiftUI
 final class Model: ObservableObject {
     @Published var rules = Rules.load().rules
     @Published var catchUp = Rules.load().catchUp
+    @Published var exceptions = Rules.load().pruned().exceptions
     @Published private(set) var saved = Rules.load()
     @Published private(set) var installed = Helper.isInstalled
     /// The service runs the binary of an older version of the app.
@@ -14,9 +15,9 @@ final class Model: ObservableObject {
     @Published var error: String?
 
     /// True when the window differs from what the service runs.
-    var dirty: Bool { current != saved || (!rules.isEmpty && (!installed || outdated)) }
+    var dirty: Bool { current != saved.pruned() || (!rules.isEmpty && (!installed || outdated)) }
 
-    private var current: Settings { Settings(rules: rules, catchUp: catchUp) }
+    private var current: Settings { Settings(rules: rules, catchUp: catchUp, exceptions: exceptions) }
 
     /// A catch-up the daemon has scheduled (see CatchUp), still to come.
     var pendingCatchUp: OneOffEvent? { upcoming.first { $0.owner == CatchUp.owner } }
@@ -43,6 +44,41 @@ final class Model: ObservableObject {
 
     func remove(_ rule: Rule) {
         rules.removeAll { $0.id == rule.id }
+        exceptions.removeAll { $0.rule == rule.id }
+    }
+
+    // MARK: Ce soir seulement
+
+    /// The skip or move of a rule's next occurrence, if it still matches the rule.
+    func exception(for rule: Rule, now: Date = Date()) -> Exception? {
+        exceptions.first { e in
+            e.rule == rule.id && e.isCurrent(now: now)
+                && Rules.minutes(of: e.date) == rule.at && rule.days.contains(Weekday(e.date))
+        }
+    }
+
+    /// The occurrence « Sauter » and « Reporter » act on.
+    func nextOccurrence(of rule: Rule) -> Date? {
+        exception(for: rule)?.date ?? Rules.next(rule, after: Date())
+    }
+
+    func skip(_ rule: Rule) {
+        guard let date = nextOccurrence(of: rule) else { return }
+        set(Exception(rule: rule.id, date: date, moved: nil))
+    }
+
+    func move(_ rule: Rule, to moved: Date) {
+        guard let date = nextOccurrence(of: rule) else { return }
+        set(Exception(rule: rule.id, date: date, moved: moved))
+    }
+
+    func restore(_ rule: Rule) {
+        exceptions.removeAll { $0.rule == rule.id }
+    }
+
+    private func set(_ e: Exception) {
+        exceptions.removeAll { $0.rule == e.rule }
+        exceptions.append(e)
     }
 
     func save() {
@@ -138,7 +174,9 @@ struct ContentView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     ForEach($model.rules) { $rule in
-                        RuleRow(rule: $rule) { model.remove(rule) }
+                        RuleRow(rule: $rule, next: model.nextOccurrence(of: rule), exception: model.exception(for: rule),
+                                onDelete: { model.remove(rule) }, onSkip: { model.skip(rule) },
+                                onMove: { model.move(rule, to: $0) }, onRestore: { model.restore(rule) })
                     }
                     Button { model.addRule() } label: {
                         Label("Ajouter une règle", systemImage: "plus.circle.fill")
@@ -147,6 +185,10 @@ struct ContentView: View {
                 } header: {
                     Text("Règles")
                 } footer: {
+                    Text("L'interrupteur met une règle en pause. « Sauter » et « Reporter » ne changent que sa prochaine fois : elle reprend ensuite comme d'habitude.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if model.rules.contains(where: { $0.action == .shutdown }) {
                         warning("Un document non enregistré peut bloquer l'extinction.")
                     }
@@ -211,7 +253,7 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        let active = model.installed && !model.saved.rules.isEmpty
+        let active = model.installed && model.saved.rules.contains(where: \.enabled)
         let next = model.upcoming.first { $0.fromRule }
         return HStack(spacing: 14) {
             Image(systemName: active ? "moon.zzz.fill" : "powersleep")
@@ -227,7 +269,7 @@ struct ContentView: View {
                     } else if let next, let date = next.date {
                         Text("Prochain : \(EventRow.noun(next.type).lowercased()) \(EventRow.when(date))")
                     } else {
-                        Text("\(model.saved.rules.count) règle(s) active(s).")
+                        Text("\(model.saved.rules.filter(\.enabled).count) règle(s) active(s).")
                     }
                 }
                 .foregroundStyle(.secondary)
@@ -275,11 +317,23 @@ private func warning(_ text: String) -> some View {
 
 struct RuleRow: View {
     @Binding var rule: Rule
+    let next: Date?
+    let exception: Exception?
     let onDelete: () -> Void
+    let onSkip: () -> Void
+    let onMove: (Date) -> Void
+    let onRestore: () -> Void
+    @State private var moving = false
+    @State private var movedTo = Date()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
+                Toggle("Active", isOn: $rule.enabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .help(rule.enabled ? "Mettre la règle en pause" : "Réactiver la règle")
                 Image(systemName: rule.action.symbol)
                     .foregroundStyle(rule.action.isNight ? Color.indigo : Color.orange)
                     .frame(width: 20)
@@ -306,8 +360,68 @@ struct RuleRow: View {
                     .lineLimit(1)
             }
             .padding(.leading, 28)
+            .opacity(rule.enabled ? 1 : 0.45)
+            if !rule.enabled {
+                Text("En pause : cette règle ne fait rien.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 28)
+            } else if let next {
+                once(next)
+                    .font(.caption)
+                    .padding(.leading, 28)
+            }
         }
         .padding(.vertical, 2)
+    }
+
+    /// « Ce soir seulement »: the next occurrence, skipped, moved, or as it is.
+    @ViewBuilder private func once(_ date: Date) -> some View {
+        HStack(spacing: 8) {
+            if let exception, let moved = exception.moved {
+                Label("\(rule.action.noun) \(rule.action.isNight ? "reportée" : "reporté") : \(EventRow.when(date)) → \(Rules.format(Rules.minutes(of: moved)))\(Calendar.current.isDate(moved, inSameDayAs: date) ? "" : " (\(moved.formatted(.dateTime.weekday(.wide))))")",
+                      systemImage: "clock.arrow.circlepath")
+                    .foregroundStyle(.indigo)
+                Spacer()
+                Button("Rétablir", action: onRestore)
+            } else if exception != nil {
+                Label("\(rule.action.noun) \(rule.action.isNight ? "sautée" : "sauté") : \(EventRow.when(date)), seulement cette fois", systemImage: "forward.end.fill")
+                    .foregroundStyle(.indigo)
+                Spacer()
+                Button("Rétablir", action: onRestore)
+            } else {
+                Text("Prochaine fois : \(EventRow.when(date))")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Sauter", action: onSkip)
+                    .help("Ne rien faire cette fois-ci, puis reprendre comme d'habitude")
+                Button("Reporter…") {
+                    movedTo = date.addingTimeInterval(3600)
+                    moving = true
+                }
+                .help("Une autre heure, cette fois-ci seulement")
+                .popover(isPresented: $moving) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("\(rule.action.noun) du \(EventRow.when(date)), cette fois-ci seulement :")
+                            .fixedSize(horizontal: false, vertical: true)
+                        DatePicker("À", selection: $movedTo, in: Date()...date.addingTimeInterval(24 * 3600))
+                        HStack {
+                            Spacer()
+                            Button("Annuler") { moving = false }
+                            Button("Reporter") {
+                                onMove(movedTo)
+                                moving = false
+                            }
+                            .keyboardShortcut(.defaultAction)
+                        }
+                    }
+                    .padding(14)
+                    .frame(width: 320)
+                }
+            }
+        }
+        .buttonStyle(.borderless)
+        .controlSize(.small)
     }
 
     private var time: Binding<Date> {
