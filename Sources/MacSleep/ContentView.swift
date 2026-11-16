@@ -224,6 +224,13 @@ struct ContentView: View {
                             .buttonStyle(.borderless)
                             .help("Relire le planning")
                     }
+                } footer: {
+                    if model.upcoming.contains(where: { !$0.fromRule && !$0.isManual }) {
+                        Text("En gris : réveils programmés par macOS lui-même (Calendrier, Concentration, maintenance…), pas par MacSleep. macOS les crée et les déplace tout seul ; survolez-en un pour voir son nom complet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 if !model.system.repeating.isEmpty {
@@ -443,13 +450,25 @@ struct EventRow: View {
             } else if event.isManual {
                 Button("Annuler", action: onCancel)
             } else {
-                Text(event.owner ?? "système")
+                Text(Self.ownerLabel(event.owner))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .help(event.owner ?? "")
             }
         }
+    }
+
+    /// « com.apple.alarm.user-visible-com.apple.donotdisturb… » → « macOS · Concentration ».
+    static func ownerLabel(_ owner: String?) -> String {
+        guard let owner else { return "système" }
+        let o = owner.lowercased()
+        let known = [("donotdisturb", "Concentration"), ("calaccessd", "Calendrier"), ("calendar", "Calendrier"),
+                     ("reminders", "Rappels"), ("mobiletimer", "Horloge"), ("softwareupdate", "mises à jour"),
+                     ("backup", "Time Machine"), ("timemachine", "Time Machine")]
+        if let (_, name) = known.first(where: { o.contains($0.0) }) { return "macOS · \(name)" }
+        return o.hasPrefix("com.apple.") ? "macOS" : owner
     }
 
     static func noun(_ type: String) -> String {

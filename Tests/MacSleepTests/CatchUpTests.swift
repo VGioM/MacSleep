@@ -48,6 +48,13 @@ final class CatchUpTests: XCTestCase {
         XCTAssertEqual(CatchUp.missed(rules, now: today(2, 0))?.action, .sleep)
     }
 
+    func testDarkWakeIsNotAWake() {
+        // pmset -g systemstate during a maintenance wake, then a real one.
+        XCTAssertTrue(CatchUp.isDarkWake(systemState: "Current System Capabilities are: CPU Network Disk \nCurrent Power State: 4\n"))
+        XCTAssertFalse(CatchUp.isDarkWake(systemState: "Current System Capabilities are: CPU Graphics Audio Network \nCurrent Power State: 4\n"))
+        XCTAssertFalse(CatchUp.isDarkWake(systemState: ""))   // unreadable: as before, catch up
+    }
+
     func testOnlyOnTheRuleDays() {
         // Shutdown on the day before only: tonight is not a MacSleep night.
         let yesterday = Weekday(Calendar.current.date(byAdding: .day, value: -1, to: Date())!)

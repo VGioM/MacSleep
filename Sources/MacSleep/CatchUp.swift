@@ -33,9 +33,24 @@ enum CatchUp {
 
     // MARK: - Run as root
 
+    /// A maintenance wake (« DarkWake ») : macOS wakes the Mac with the
+    /// screen off, for its own upkeep, then puts it back to sleep. launchd
+    /// runs the hourly slot missed during sleep right then, so without this
+    /// every night with a sleep rule looked caught up (« veille à 1:18 »).
+    /// `pmset -g systemstate` lists Graphics only for a real wake.
+    static func isDarkWake(systemState: String) -> Bool {
+        guard let line = systemState.split(separator: "\n").first(where: { $0.contains("Capabilities") }) else { return false }
+        return !line.contains("Graphics")
+    }
+
+    static var inDarkWake: Bool { isDarkWake(systemState: PMSet.run(["-g", "systemstate"]).output) }
+
     /// From the daemon's hourly `--sync`.
-    static func run(_ settings: Settings = Rules.load(), now: Date = Date()) {
+    static func run(_ settings: Settings = Rules.load(), now: Date = Date(), darkWake: () -> Bool = { inDarkWake }) {
         guard settings.catchUp, let event = missed(settings.rules, exceptions: settings.exceptions, now: now) else { return }
+        // Asleep as the rule wanted, only up for macOS's upkeep: nothing to
+        // catch up, and the night stays unhandled for a real wake later on.
+        guard !darkWake() else { return }
         let key = PMSet.stamp(event.date)
         guard handled != key else { return }
         handled = key
