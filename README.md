@@ -3,6 +3,8 @@
 Programme la mise en veille (ou l'extinction) du Mac le soir et son réveil
 (ou allumage) le matin, depuis une fenêtre, sans passer par le Terminal.
 
+<p align="center"><img src="docs/capture.png" width="380" alt="Fenêtre de MacSleep"></p>
+
 ## Installation
 
 Téléchargez `MacSleep-X.Y.Z-macOS-arm64.zip` depuis la
